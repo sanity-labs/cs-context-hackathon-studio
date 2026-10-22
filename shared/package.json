@@ -1,0 +1,11 @@
+{
+  "name": "@hackathon/agents",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.6"
+  }
+}
