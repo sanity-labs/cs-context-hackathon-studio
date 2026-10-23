@@ -10,6 +10,10 @@ export type Handoff = {
   readToken: string
   organizationId: string
   studioUrl?: string
+  /** The day of the hackathon, as YYYY-MM-DD. */
+  hackathonDate?: string
+  /** When the customer's tokens stop working, so ours can match. */
+  expiresAt?: string
 }
 
 const PREFIX = 'context-hackathon:1:'
@@ -42,5 +46,5 @@ export function decodeHandoff(line: string): Handoff {
   }
   const {projectId, dataset, readToken, organizationId} = parsed
   if (!projectId || !dataset || !readToken || !organizationId) throw new Error('The handoff line is missing a value. Ask for a new one.')
-  return {projectId, dataset, readToken, organizationId, studioUrl: parsed.studioUrl}
+  return {projectId, dataset, readToken, organizationId, studioUrl: parsed.studioUrl, hackathonDate: parsed.hackathonDate, expiresAt: parsed.expiresAt}
 }

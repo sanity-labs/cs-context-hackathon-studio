@@ -38,7 +38,10 @@ const DATASET = 'production'
 type Run = {code: number; stdout: string; stderr: string}
 
 /** Runs the Sanity CLI from the Studio folder. Interactive commands share this terminal. */
-function sanity(args: string[], {interactive = false, env = {}}: {interactive?: boolean; env?: Record<string, string>} = {}): Promise<Run> {
+function sanity(
+  args: string[],
+  {interactive = false, env = {}}: {interactive?: boolean; env?: Record<string, string>} = {},
+): Promise<Run> {
   return new Promise((done) => {
     const child = spawn(SANITY_BIN, args, {
       cwd: STUDIO,
@@ -64,6 +67,49 @@ async function sanityJson<T>(args: string[]): Promise<T> {
   const run = await sanity(args)
   if (run.code !== 0) throw new Error((run.stderr || run.stdout).trim() || `sanity ${args.join(' ')} failed`)
   return json<T>(run.stdout)
+}
+
+/** The first line of a CLI error, which is the one that says what went wrong. */
+function firstLine(text: string): string {
+  return text.trim().split('\n')[0] ?? 'unknown error'
+}
+
+/**
+ * Tokens stop working a week after the hackathon, whether or not anyone tidies
+ * up: the organization token can change Knowledge Bases across the organization,
+ * and attendees can read it.
+ */
+const EXPIRES_AFTER_DAYS = 7
+
+function expiryAfter(day: string): string {
+  const date = new Date(`${day}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + EXPIRES_AFTER_DAYS)
+  return date.toISOString()
+}
+
+const formatDay = (iso: string) => new Date(iso).toLocaleDateString('en-GB', {day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'})
+
+type Robot = {id?: string; token?: string; key?: string}
+
+/**
+ * An organization token. `--grant context=editor` is Context Editor in Manage
+ * (the `knowledge-base-editor-robot` role). The person running setup needs an
+ * organization role that may create tokens, which an organization admin has.
+ */
+async function createOrganizationToken(organizationId: string, label: string, expiresAt: string): Promise<{id: string; token: string}> {
+  const run = await sanity(['tokens', 'create', label, '--organization', organizationId, '--grant', 'context=editor', '--expires-at', expiresAt, '--yes', '--json'])
+  if (run.code !== 0) throw new Error(firstLine(run.stderr || run.stdout))
+  const robot = json<Robot>(run.stdout)
+  const token = robot.token ?? robot.key
+  if (!robot.id || !token) throw new Error('the CLI created no token')
+  return {id: robot.id, token}
+}
+
+/** Best effort: a token setup replaced is no use to anyone, and it expires anyway. */
+async function deleteToken(scope: {projectId: string} | {organizationId: string}, id: string | undefined) {
+  if (!id) return
+  const where = 'projectId' in scope ? ['-p', scope.projectId] : ['--organization', scope.organizationId]
+  await sanity(['tokens', 'delete', id, ...where, '--yes'])
 }
 
 function check<T>(value: T): Exclude<T, symbol> {
@@ -120,13 +166,13 @@ async function main() {
   const SECRETS_NOTE = [
     'Setup saves it in this project\'s private secrets document (the Studio\'s Keys view), where only the',
     'chat app\'s server uses it. Anyone with read access to the project can read that document, and this',
-    'token can change Sanity Context across your organization, so delete it after the hackathon.',
+    'token can change Sanity Context across your organization. It stops working on the date above; delete it sooner if you like.',
   ].join('\n')
 
   p.note(
     [
       'You will need:',
-      '- an organization admin in Sanity (to create an organization token and use Sanity Context)',
+      '- to run this as an organization admin in Sanity: setup creates an organization token for Sanity Context',
       '- Knowledge Bases enabled in your organization\'s Labs settings',
       '',
       'Sanity hosts the chat app and covers the models, so there are no model keys to arrange.',
@@ -207,10 +253,28 @@ async function main() {
     await sanity(['datasets', 'create', DATASET, '--visibility', 'private', '-p', projectId])
   }
 
-  // 4. Token 1 of 2: a project token, so the chat app can read the agents
-  let readToken = previous.SANITY_PROJECT_ID === projectId ? previous.SANITY_READ_TOKEN : undefined
+  // 4. The date, which both tokens expire after
+  const today = new Date().toISOString().slice(0, 10)
+  const hackathonDate = check(
+    await p.text({
+      message: `When is the hackathon? (YYYY-MM-DD) Setup's tokens expire ${EXPIRES_AFTER_DAYS} days after it.`,
+      initialValue: previous.HACKATHON_DATE && previous.HACKATHON_DATE >= today ? previous.HACKATHON_DATE : '',
+      placeholder: today,
+      validate: (value) => {
+        if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value))) return 'A date like 2026-11-12'
+        if (value < today) return 'That date has passed'
+        return undefined
+      },
+    }),
+  )
+  const expiresAt = expiryAfter(hackathonDate)
+
+  // 5. Token 1 of 2: a project token, so the chat app can read the agents
+  const sameReadToken = previous.SANITY_PROJECT_ID === projectId && previous.SANITY_READ_TOKEN && previous.SANITY_READ_TOKEN_EXPIRES === expiresAt
+  let readToken = sameReadToken ? previous.SANITY_READ_TOKEN : undefined
+  let readTokenId = sameReadToken ? previous.SANITY_READ_TOKEN_ID : undefined
   if (!readToken) {
-    const token = await sanityJson<{key?: string; token?: string}>([
+    const token = await sanityJson<Robot>([
       'tokens',
       'create',
       'Chat app: read agents',
@@ -218,15 +282,20 @@ async function main() {
       projectId,
       '--role',
       'viewer',
+      '--expires-at',
+      expiresAt,
       '--yes',
       '--json',
     ])
-    readToken = token.key ?? token.token
+    readToken = token.token ?? token.key
+    readTokenId = token.id
     if (!readToken) throw new Error('Could not create a read token for the chat app.')
-    p.log.success('Token 1 of 2 done: created a project token, "Chat app: read agents", so the chat app can read the agents. Nothing to do.')
+    // A new date replaces the token from the last run, rather than leaving both.
+    if (previous.SANITY_PROJECT_ID === projectId && previous.SANITY_READ_TOKEN_ID !== readTokenId) await deleteToken({projectId}, previous.SANITY_READ_TOKEN_ID)
+    p.log.success(`Token 1 of 2 done: created a project token, "Chat app: read agents", so the chat app can read the agents. It expires on ${formatDay(expiresAt)}. Nothing to do.`)
   }
 
-  // 5. Knowledge Bases
+  // 6. Knowledge Bases
   type KnowledgeBase = {publicId: string; title: string; state?: string}
   let knowledgeBases: KnowledgeBase[] = []
   const listed = await sanity(['context', 'list', '--organization', organizationId, '--json'])
@@ -253,21 +322,7 @@ async function main() {
     p.log.info(`Do the dry run: build one small Knowledge Base now, then run setup again so the example agents can use it: https://www.sanity.io/@${organizationId}/context/knowledge-bases/new`)
   }
 
-  // 6. Token 2 of 2: an organization token, so the chat app can read Knowledge Bases and save conversations to Insights
-  p.note(
-    [
-      'Setup just made token 1, for the agents\' project. This second token is different: it belongs to the',
-      'whole organization. The chat app reads Knowledge Bases with it, and saves each conversation to Insights,',
-      'which needs write access to Sanity Context. Sanity only issues these from Manage, so this step is by hand.',
-      '',
-      '1. Open https://www.sanity.io/manage/org/api/tokens (organization-level tokens, not project tokens)',
-      `2. Pick ${organization?.name ?? 'your organization'} and add a token named "Chat app: Context and Insights"`,
-      '3. Give it the Context Editor role (Context Viewer can\'t save conversations), and copy it',
-      '',
-      SECRETS_NOTE,
-    ].join('\n'),
-    'Token 2 of 2: organization token',
-  )
+  // 7. Token 2 of 2: an organization token, so the chat app can read Knowledge Bases and save conversations to Insights
   const storedSecrets = await sanityJson<{result?: Record<string, string> | null}>([
     'api',
     `data/query/${DATASET}`,
@@ -278,13 +333,44 @@ async function main() {
     `query=*[_id == "${SECRETS_ID}"][0].secrets`,
   ]).catch(() => ({result: null}))
   const savedToken = storedSecrets.result?.[CONTEXT_TOKEN_KEY]
-  const contextToken =
-    check(
-      await p.password({
-        message: `Paste the organization token${savedToken ? ' (Enter keeps the current one)' : ''}`,
-        validate: (value) => (value || savedToken ? undefined : 'Required'),
-      }),
-    ) || savedToken || ''
+  const sameContextToken = Boolean(savedToken) && previous.SANITY_PROJECT_ID === projectId && previous.CONTEXT_TOKEN_EXPIRES === expiresAt
+  let contextToken = sameContextToken ? (savedToken ?? '') : ''
+  let contextTokenId = sameContextToken ? previous.CONTEXT_TOKEN_ID : undefined
+  if (sameContextToken) {
+    p.log.success(`Token 2 of 2: keeping the organization token from the last run. It expires on ${formatDay(expiresAt)}.`)
+  } else {
+    try {
+      const created = await createOrganizationToken(organizationId, 'Chat app: Context and Insights', expiresAt)
+      contextToken = created.token
+      contextTokenId = created.id
+      if (previous.CONTEXT_TOKEN_ID !== created.id) await deleteToken({organizationId}, previous.CONTEXT_TOKEN_ID)
+      p.log.success(
+        `Token 2 of 2 done: created an organization token, "Chat app: Context and Insights" (Context Editor), so the chat app can read Knowledge Bases and save conversations to Insights. It expires on ${formatDay(expiresAt)}, and is saved in the Studio under Keys. Nothing to do.`,
+      )
+    } catch (error) {
+      p.note(
+        [
+          `Setup couldn't create the organization token itself (${error instanceof Error ? error.message : error}).`,
+          'That usually means your account can\'t create organization tokens. An organization admin can do it by hand:',
+          '',
+          '1. Open https://www.sanity.io/manage/org/api/tokens (organization-level tokens, not project tokens)',
+          `2. Pick ${organization?.name ?? 'your organization'} and add a token named "Chat app: Context and Insights"`,
+          `3. Give it the Context Editor role, set it to expire on ${formatDay(expiresAt)}, and copy it`,
+          '',
+          SECRETS_NOTE,
+        ].join('\n'),
+        'Token 2 of 2: organization token',
+      )
+      contextToken =
+        check(
+          await p.password({
+            message: `Paste the organization token${savedToken ? ' (Enter keeps the current one)' : ''}`,
+            validate: (value) => (value || savedToken ? undefined : 'Required'),
+          }),
+        ) || savedToken || ''
+      contextTokenId = undefined
+    }
+  }
 
   // Both halves of what the chat app does with it: read Knowledge Bases, and save a conversation to Insights.
   const contextClient = createClient({
@@ -317,7 +403,7 @@ async function main() {
     )
   }
 
-  // 7. Studio address
+  // 8. Studio address
   let hostname = check(
     await p.text({
       message: 'Studio address: ____.sanity.studio',
@@ -326,7 +412,7 @@ async function main() {
     }),
   )
 
-  // 8. Env files
+  // 9. Env files
   const studioEnv = {
     SANITY_STUDIO_PROJECT_ID: projectId,
     SANITY_STUDIO_DATASET: DATASET,
@@ -335,14 +421,19 @@ async function main() {
   }
   writeEnv(STUDIO_ENV, 'Written by the hackathon setup', studioEnv)
   // Not in .env: the Studio's build reads that, and only SANITY_STUDIO_ values should ever reach it.
-  writeEnv(CHAT_ENV, 'Written by the hackathon setup: what the chat app needs. Kept out of git; the handoff line carries it to Sanity.', {
+  writeEnv(CHAT_ENV, 'Written by the hackathon setup: what the chat app needs, and what a re-run reuses. Kept out of git; the handoff line carries it to Sanity.', {
     SANITY_PROJECT_ID: projectId,
     SANITY_DATASET: DATASET,
     SANITY_READ_TOKEN: readToken,
+    SANITY_READ_TOKEN_ID: readTokenId,
+    SANITY_READ_TOKEN_EXPIRES: expiresAt,
+    CONTEXT_TOKEN_ID: contextTokenId,
+    CONTEXT_TOKEN_EXPIRES: expiresAt,
+    HACKATHON_DATE: hackathonDate,
   })
   p.log.success('Wrote .env and .env.chat')
 
-  // 9. Settings and example agents
+  // 10. Settings and example agents
   const existing = await sanityJson<{result?: {chatUrl?: string} | null}>([
     'api',
     `data/query/${DATASET}`,
@@ -374,7 +465,7 @@ async function main() {
     p.log.success('Saved the settings, the organization token (under Keys) and two example agents (existing agents were left alone)')
   }
 
-  // 10. Deploy the schema and the Studio
+  // 11. Deploy the schema and the Studio
   const spin = p.spinner()
   spin.start('Deploying the schema')
   const schema = await sanity(['schemas', 'deploy'], {env: studioEnv})
@@ -396,6 +487,8 @@ async function main() {
     readToken,
     organizationId,
     studioUrl: `https://${hostname}.sanity.studio`,
+    hackathonDate,
+    expiresAt,
   })
   p.note(
     [
@@ -411,6 +504,7 @@ async function main() {
       '2. Set any tool keys in the Studio, under Keys.',
       `3. Invite attendees to the project as Editors: https://www.sanity.io/manage/project/${projectId}/members`,
       '',
+      `Both of setup's tokens stop working on ${formatDay(expiresAt)}, a week after the hackathon. To change the date, run ${RERUN} again.`,
       `Lost the line? It's also in .env.chat, and running ${RERUN} again prints it.`,
     ].join('\n'),
     'Done',
