@@ -6,6 +6,7 @@
   "description": "The Studio for a Context Hackathon: agents, their Knowledge Bases and tools, and the keys the chat app uses.",
   "scripts": {
     "hackathon": "tsx scripts/setup.ts",
+    "handoff": "tsx scripts/handoff.ts",
     "dev": "sanity dev",
     "build": "sanity build",
     "deploy": "sanity deploy",
@@ -15,7 +16,7 @@
   "dependencies": {
     "@clack/prompts": "^1.8.1",
     "@hackathon/agents": "file:./shared",
-    "@sanity/client": "^8.10.1",
+    "@sanity/client": "^8.11.0",
     "@sanity/icons": "^5.2.3",
     "@sanity/studio-secrets": "^4.0.24",
     "@sanity/ui": "^4.4.10",

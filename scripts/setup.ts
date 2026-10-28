@@ -505,7 +505,7 @@ async function main() {
       `3. Invite attendees to the project as Editors: https://www.sanity.io/manage/project/${projectId}/members`,
       '',
       `Both of setup's tokens stop working on ${formatDay(expiresAt)}, a week after the hackathon. To change the date, run ${RERUN} again.`,
-      `Lost the line? It's also in .env.chat, and running ${RERUN} again prints it.`,
+      `Lost the line? ${PM === 'pnpm' ? 'pnpm handoff' : 'npm run handoff'} prints it again.`,
     ].join('\n'),
     'Done',
   )
