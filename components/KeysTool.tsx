@@ -104,6 +104,11 @@ export function KeysTool() {
   )
 }
 
+/** How a set secret shows: dots, and its last four characters so you can tell which key it is. */
+function masked(value: string): string {
+  return value.length >= 16 ? `••••••••••••${value.slice(-4)}` : '••••••••••••'
+}
+
 function KeyRow({row, value, disabled, onSave}: {row: Row; value?: string; disabled: boolean; onSave: (value: string | undefined) => void}) {
   const [draft, setDraft] = useState('')
   const isSet = Boolean(value)
@@ -119,11 +124,6 @@ function KeyRow({row, value, disabled, onSave}: {row: Row; value?: string; disab
           <Badge tone={isSet ? 'positive' : row.optional ? 'default' : 'caution'} fontSize={0}>
             {isSet ? 'Set' : row.optional ? 'Optional' : 'Not set'}
           </Badge>
-          {!secret && isSet ? (
-            <Text size={1} muted>
-              {value}
-            </Text>
-          ) : null}
         </Flex>
         {row.help ? (
           <Text size={1} muted>
@@ -135,7 +135,8 @@ function KeyRow({row, value, disabled, onSave}: {row: Row; value?: string; disab
             <TextInput
               type={secret ? 'password' : 'text'}
               autoComplete="off"
-              placeholder={isSet ? (secret ? 'Enter a new value to replace it' : 'Enter a new value') : 'Value'}
+              // A set key reads as set: dots for a secret, with its last four characters when it's long enough to keep them safe to show.
+              placeholder={isSet ? (secret ? masked(value ?? '') : value) : 'Value'}
               value={draft}
               onChange={(event: ChangeEvent<HTMLInputElement>) => setDraft(event.currentTarget.value)}
               disabled={disabled}
@@ -143,7 +144,7 @@ function KeyRow({row, value, disabled, onSave}: {row: Row; value?: string; disab
             />
           </Box>
           <Button
-            text="Save"
+            text={isSet ? 'Replace' : 'Save'}
             tone="primary"
             fontSize={1}
             disabled={disabled || !draft.trim()}

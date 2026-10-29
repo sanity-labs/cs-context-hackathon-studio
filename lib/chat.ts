@@ -1,4 +1,4 @@
-import type {Model} from '@hackathon/agents'
+import {type Model, SECRETS_ID, STUDIO_ACCESS_HEADER, STUDIO_ACCESS_KEY} from '@hackathon/agents'
 import {type SanityClient, useClient} from 'sanity'
 
 import {apiVersion} from '../env'
@@ -26,15 +26,42 @@ type FromChat<T> = {chatUrl: string; data: T}
  * address in Settings, which tools and models there are. A tool merged into
  * the chat app shows up here without redeploying the Studio.
  */
-async function fromChat<T>(client: SanityClient, path: string): Promise<FromChat<T>> {
+async function fromChat<T>(client: SanityClient, path: string, headers: Record<string, string> = {}): Promise<FromChat<T>> {
   const chatUrl = await client.fetch<string | null>(`*[_id == "settings"][0].chatUrl`)
   if (!chatUrl) throw new Error('Add the chat address in Settings first')
-  const response = await fetch(new URL(path, chatUrl), {cache: 'no-store'})
+  const response = await fetch(new URL(path, chatUrl), {cache: 'no-store', headers})
   if (!response.ok) throw new Error(`the chat app answered ${response.status}`)
   return {chatUrl, data: (await response.json()) as T}
 }
 
-const loadTools = cachedFor(30_000, (client: SanityClient) => fromChat<ToolCatalog>(client, '/api/tools'))
+/**
+ * The value that lets this Studio list the chat's tools, from the private
+ * secrets document. Made the first time, with setIfMissing so two Studios
+ * opening at once agree on one. Someone who can only read the project still
+ * reads it; it's made once anyone who can edit opens a picker.
+ */
+async function studioAccess(client: SanityClient): Promise<string | undefined> {
+  const read = () => client.fetch<string | null>(`*[_id == $id][0].secrets.${STUDIO_ACCESS_KEY}`, {id: SECRETS_ID})
+  const found = await read()
+  if (found) return found
+  const bytes = crypto.getRandomValues(new Uint8Array(24))
+  const value = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  try {
+    await client
+      .transaction()
+      .createIfNotExists({_id: SECRETS_ID, _type: 'pluginSecrets', secrets: {}})
+      .patch(SECRETS_ID, (patch) => patch.setIfMissing({secrets: {}}).setIfMissing({[`secrets.${STUDIO_ACCESS_KEY}`]: value}))
+      .commit()
+  } catch {
+    return undefined
+  }
+  return (await read()) ?? undefined
+}
+
+const loadTools = cachedFor(30_000, async (client: SanityClient) => {
+  const access = await studioAccess(client)
+  return fromChat<ToolCatalog>(client, '/api/tools', access ? {[STUDIO_ACCESS_HEADER]: access} : {})
+})
 const loadModels = cachedFor(5 * 60_000, (client: SanityClient) => fromChat<{models: Model[]}>(client, '/api/models'))
 
 /** `reload` asks again once the short cache has gone stale, as a picker opening does. */

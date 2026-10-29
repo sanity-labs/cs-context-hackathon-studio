@@ -43,4 +43,14 @@ export const SECRETS_ID = `secrets.${SECRETS_NAMESPACE}`
 /** The key the Context organization token is stored under in the secrets document. */
 export const CONTEXT_TOKEN_KEY = 'SANITY_CONTEXT_TOKEN'
 
+/**
+ * What the Studio shows the chat app to list the tools and their keys
+ * (/api/tools). It lives in the secrets document, so only someone who can read
+ * the project has it: the Studio makes it the first time it asks. Lower case
+ * with a leading underscore, so it isn't a key: the Keys view doesn't list it
+ * and no tool can ask for it.
+ */
+export const STUDIO_ACCESS_KEY = '_studioAccess'
+export const STUDIO_ACCESS_HEADER = 'x-hackathon-studio-access'
+
 export const SETTINGS_ID = 'settings'
