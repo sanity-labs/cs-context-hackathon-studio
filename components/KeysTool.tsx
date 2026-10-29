@@ -35,7 +35,7 @@ export function KeysTool() {
   const declared: ToolKey[] = state.status === 'ready' ? state.data.data.keys : []
   const byConnector = new Map<string, ToolKey[]>()
   for (const key of declared) byConnector.set(key.title, [...(byConnector.get(key.title) ?? []), key])
-  for (const [title, keys] of byConnector) groups.push({title, rows: keys.map((key) => ({key: key.key, kind: key.kind, optional: key.optional}))})
+  for (const [title, keys] of byConnector) groups.push({title, rows: keys.map((key) => ({key: key.key, kind: key.kind, optional: key.optional, help: key.help}))})
   // Keys added here that no tool reads yet, like one for a tool still in a pull request.
   const known = new Set([CONTEXT_TOKEN_KEY, ...declared.map((key) => key.key)])
   const others = Object.keys(values)

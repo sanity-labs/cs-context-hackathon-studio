@@ -15,7 +15,7 @@ export type ToolSummary = {
   keys: string[]
 }
 
-export type ToolKey = {connector: string; title: string; key: string; kind: 'secret' | 'config'; optional?: true}
+export type ToolKey = {connector: string; title: string; key: string; kind: 'secret' | 'config'; optional?: true; help?: string}
 
 export type ToolCatalog = {tools: ToolSummary[]; keys: ToolKey[]}
 
