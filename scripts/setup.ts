@@ -69,6 +69,18 @@ async function sanityJson<T>(args: string[]): Promise<T> {
   return json<T>(run.stdout)
 }
 
+/** The deployed Studio at <hostname>.sanity.studio: its id is what `deployment.appId` in sanity.cli.ts wants. */
+async function studioAppId(projectId: string, hostname: string): Promise<string | undefined> {
+  const app = await sanityJson<{id?: string} | null>([
+    'api',
+    `projects/${projectId}/user-applications?appHost=${encodeURIComponent(hostname)}&appType=studio`,
+    '--global',
+    '--api-version',
+    'v2024-08-01',
+  ]).catch(() => null)
+  return app?.id
+}
+
 /** The first line of a CLI error, which is the one that says what went wrong. */
 function firstLine(text: string): string {
   return text.trim().split('\n')[0] ?? 'unknown error'
@@ -413,11 +425,13 @@ async function main() {
   )
 
   // 9. Env files
-  const studioEnv = {
+  const studioEnv: Record<string, string> = {
     SANITY_STUDIO_PROJECT_ID: projectId,
     SANITY_STUDIO_DATASET: DATASET,
     SANITY_STUDIO_ORGANIZATION_ID: organizationId,
     SANITY_STUDIO_HOSTNAME: hostname,
+    // The last deploy's Studio, kept only while it's the same project and address.
+    ...(previous.SANITY_STUDIO_APP_ID && previous.SANITY_STUDIO_PROJECT_ID === projectId && previous.SANITY_STUDIO_HOSTNAME === hostname ? {SANITY_STUDIO_APP_ID: previous.SANITY_STUDIO_APP_ID} : {}),
   }
   writeEnv(STUDIO_ENV, 'Written by the hackathon setup', studioEnv)
   // Not in .env: the Studio's build reads that, and only SANITY_STUDIO_ values should ever reach it.
@@ -474,10 +488,16 @@ async function main() {
   for (;;) {
     p.log.step(`Deploying the Studio to https://${hostname}.sanity.studio`)
     const deploy = await sanity(['deploy', '--url', hostname, '--yes'], {interactive: true, env: {...studioEnv, SANITY_STUDIO_HOSTNAME: hostname}})
-    if (deploy.code === 0) break
+    if (deploy.code === 0) {
+      // Saved so the next deploy goes straight to this Studio, as the CLI suggests.
+      const appId = await studioAppId(projectId, hostname)
+      if (appId && appId !== studioEnv.SANITY_STUDIO_APP_ID) writeEnv(STUDIO_ENV, 'Written by the hackathon setup', {...studioEnv, SANITY_STUDIO_HOSTNAME: hostname, SANITY_STUDIO_APP_ID: appId})
+      break
+    }
     const retry = check(await p.confirm({message: 'The Studio didn\'t deploy. Try another address?'}))
     if (!retry) break
     hostname = check(await p.text({message: 'Studio address: ____.sanity.studio', validate: (v) => (v && /^[a-z0-9][a-z0-9-]{2,62}$/.test(v) ? undefined : 'Lowercase letters, numbers and dashes')}))
+    delete studioEnv.SANITY_STUDIO_APP_ID
     writeEnv(STUDIO_ENV, 'Written by the hackathon setup', {...studioEnv, SANITY_STUDIO_HOSTNAME: hostname})
   }
 
