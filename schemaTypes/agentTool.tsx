@@ -147,6 +147,6 @@ function ToolPicker(props: PickFunctionsProps) {
 }
 
 export const toolsDescription =
-  'Look-ups in other systems, like a Slack channel or today\'s exchange rate: its records. A Knowledge Base says what the policy is; a tool says what happened. It decides when to use each one, so pick only what the job needs.'
+  'Look-ups in other systems, like an order system or today\'s exchange rate: its records. A Knowledge Base says what the policy is; a tool says what happened. It decides when to use each one, so pick only what the job needs.'
 
 export const ToolsInput = withPicker(ToolPicker)
