@@ -38,9 +38,11 @@ export function encodeHandoff(handoff: Handoff): string {
 export function decodeHandoff(line: string): Handoff {
   const trimmed = line.trim()
   if (!trimmed.startsWith(PREFIX)) throw new Error(`That isn't a handoff line: it should start with ${PREFIX}`)
+  // A line copied out of a terminal box or an email can arrive wrapped, with borders and spaces in it. None of those are base64url, so they go.
+  const encoded = trimmed.slice(PREFIX.length).replace(/[^A-Za-z0-9_-]/g, '')
   let parsed: Partial<Handoff>
   try {
-    parsed = JSON.parse(fromBase64Url(trimmed.slice(PREFIX.length))) as Partial<Handoff>
+    parsed = JSON.parse(fromBase64Url(encoded)) as Partial<Handoff>
   } catch {
     throw new Error('The handoff line is damaged. Ask for it again, or copy it in one piece.')
   }

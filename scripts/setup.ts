@@ -514,12 +514,7 @@ async function main() {
     [
       `Studio: https://${hostname}.sanity.studio`,
       '',
-      'Send this line to your Sanity contact. It holds the read-only project token the chat app reads the agents',
-      'and Keys with, so use a secure share (like a 1Password link), not email or Slack:',
-      '',
-      handoff,
-      '',
-      'They set up the chat app from it and send back its address and passcode. Then:',
+      'Once your Sanity contact has set up the chat app from the line below, they send back its address and passcode. Then:',
       '1. In the Studio, open Settings and paste the chat\'s address, so "Try it" and the tool and model pickers work.',
       '2. Set any tool keys in the Studio, under Keys.',
       `3. Invite attendees to the project as Editors: https://www.sanity.io/manage/project/${projectId}/members`,
@@ -529,6 +524,14 @@ async function main() {
     ].join('\n'),
     'Done',
   )
+  p.log.message(
+    [
+      'Send this line to your Sanity contact. It holds the read-only project token the chat app reads the agents',
+      'and Keys with, so use a secure share (like a 1Password link), not email or Slack.',
+    ].join('\n'),
+  )
+  // On its own, outside any box: a note wraps a long line and puts its border in what gets copied.
+  console.log(`\n${handoff}\n`)
   p.outro('Happy hacking.')
 }
 
