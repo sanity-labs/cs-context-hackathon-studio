@@ -184,9 +184,13 @@ function SlackSetup({chatUrl}: {chatUrl: string}) {
         <Text size={1}>2. Clicks Install to Workspace.</Text>
         <Text size={1}>
           3. Pastes the Bot User OAuth Token (OAuth &amp; Permissions) into SLACK_BOT_TOKEN, and the Signing Secret (Basic
-          Information) into SLACK_SIGNING_SECRET, below.
+          Information → App Credentials) into SLACK_SIGNING_SECRET, below.
         </Text>
         <Text size={1}>4. Invites the app to the channels agents should read, with /invite. Then mention it to ask.</Text>
+        <Text size={1} weight="semibold">
+          Set both keys before anyone messages the app. Until the signing secret is set, the chat app refuses every message from
+          Slack, so the app stays silent. A message sent before then won&apos;t be answered: send it again.
+        </Text>
       </Stack>
     </Card>
   )
